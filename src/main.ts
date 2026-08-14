@@ -17,18 +17,23 @@ type VaultFile = {
   data: string;
 };
 
-const app = document.querySelector<HTMLDivElement>("#app");
-
-if (!app) {
-  throw new Error("Elemento #app non trovato");
-}
-
 const storageKey = "bluevault-file";
+
 let entries: Entry[] = [];
 let masterPassword = "";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+function getApp(): HTMLDivElement {
+  const element = document.querySelector<HTMLDivElement>("#app");
+
+  if (element === null) {
+    throw new Error("Elemento #app non trovato");
+  }
+
+  return element;
+}
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(bytes.byteLength);
@@ -137,7 +142,7 @@ async function decryptVault(
   const value: unknown = JSON.parse(decoder.decode(decrypted));
 
   if (!Array.isArray(value)) {
-    throw new Error("Vault non valido");
+    throw new Error("Formato vault non valido");
   }
 
   return value as Entry[];
@@ -146,15 +151,36 @@ async function decryptVault(
 function getStoredFile(): VaultFile | null {
   const raw = localStorage.getItem(storageKey);
 
-  if (!raw) {
+  if (raw === null) {
     return null;
   }
 
   try {
-    return JSON.parse(raw) as VaultFile;
+    const parsed: unknown = JSON.parse(raw);
+
+    if (!isVaultFile(parsed)) {
+      return null;
+    }
+
+    return parsed;
   } catch {
     return null;
   }
+}
+
+function isVaultFile(value: unknown): value is VaultFile {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<VaultFile>;
+
+  return (
+    candidate.version === 1 &&
+    typeof candidate.salt === "string" &&
+    typeof candidate.iv === "string" &&
+    typeof candidate.data === "string"
+  );
 }
 
 function saveStoredFile(file: VaultFile): void {
@@ -167,7 +193,7 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 ): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
 
-  if (className) {
+  if (className !== undefined) {
     element.className = className;
   }
 
@@ -182,7 +208,7 @@ function addText(
 ): HTMLElement {
   const element = document.createElement(tag);
 
-  if (className) {
+  if (className !== undefined) {
     element.className = className;
   }
 
@@ -192,7 +218,32 @@ function addText(
   return element;
 }
 
+function createInput(
+  id: string,
+  placeholder: string,
+  type = "text"
+): HTMLInputElement {
+  const input = createElement("input");
+
+  input.id = id;
+  input.type = type;
+  input.placeholder = placeholder;
+
+  return input;
+}
+
+function createField(
+  text: string,
+  input: HTMLInputElement | HTMLSelectElement
+): HTMLLabelElement {
+  const label = createElement("label");
+  label.appendChild(document.createTextNode(text));
+  label.appendChild(input);
+  return label;
+}
+
 function renderLogin(): void {
+  const app = getApp();
   app.replaceChildren();
 
   const main = createElement("main", "app");
@@ -215,15 +266,16 @@ function renderLogin(): void {
 
   const spacer = createElement("div", "spacer");
 
-  const label = createElement("label");
-  label.appendChild(document.createTextNode("Password principale"));
+  const masterLabel = createElement("label");
+  masterLabel.appendChild(document.createTextNode("Password principale"));
 
-  const masterInput = createElement("input");
-  masterInput.id = "master";
-  masterInput.type = "password";
+  const masterInput = createInput(
+    "master",
+    "Almeno 12 caratteri",
+    "password"
+  );
   masterInput.autocomplete = "new-password";
-  masterInput.placeholder = "Almeno 12 caratteri";
-  label.appendChild(masterInput);
+  masterLabel.appendChild(masterInput);
 
   const actions = createElement("div", "actions");
 
@@ -242,7 +294,7 @@ function renderLogin(): void {
     "subtitle warning-text"
   );
 
-  card.replaceChildren(brand, spacer, label, actions, warning);
+  card.append(brand, spacer, masterLabel, actions, warning);
   main.appendChild(card);
   app.appendChild(main);
 
@@ -258,7 +310,7 @@ function renderLogin(): void {
 async function createVault(): Promise<void> {
   const input = document.querySelector<HTMLInputElement>("#master");
 
-  if (!input) {
+  if (input === null) {
     return;
   }
 
@@ -269,7 +321,10 @@ async function createVault(): Promise<void> {
     return;
   }
 
-  if (getStoredFile() && !confirm("Esiste già un vault. Sovrascriverlo?")) {
+  if (
+    getStoredFile() !== null &&
+    !confirm("Esiste già un vault. Sovrascriverlo?")
+  ) {
     return;
   }
 
@@ -285,11 +340,11 @@ async function unlock(): Promise<void> {
   const input = document.querySelector<HTMLInputElement>("#master");
   const file = getStoredFile();
 
-  if (!input) {
+  if (input === null) {
     return;
   }
 
-  if (!file) {
+  if (file === null) {
     alert("Non esiste ancora un vault. Premi “Crea nuovo vault”.");
     return;
   }
@@ -338,37 +393,15 @@ function generatePassword(length = 20): string {
   ).join("");
 }
 
-function createInput(
-  id: string,
-  placeholder: string,
-  type = "text"
-): HTMLInputElement {
-  const input = createElement("input");
-
-  input.id = id;
-  input.type = type;
-  input.placeholder = placeholder;
-
-  return input;
-}
-
-function createField(
-  text: string,
-  input: HTMLInputElement | HTMLSelectElement
-): HTMLLabelElement {
-  const label = createElement("label");
-  label.appendChild(document.createTextNode(text));
-  label.appendChild(input);
-  return label;
-}
-
 function renderVault(): void {
+  const app = getApp();
   app.replaceChildren();
 
   const main = createElement("main", "app");
 
   const header = createElement("header", "header");
   const brand = createElement("div", "brand");
+
   const logo = createElement("div", "logo");
   logo.textContent = "🔐";
 
@@ -391,16 +424,19 @@ function renderVault(): void {
   const grid = createElement("div", "grid");
 
   const titleInput = createInput("title", "Esempio: Gmail");
+
   const categoryInput = createElement("select");
   categoryInput.id = "category";
 
-  for (const category of [
+  const categories = [
     "Email",
     "Siti web",
     "Wi‑Fi",
     "Shopping",
     "Altro"
-  ]) {
+  ];
+
+  for (const category of categories) {
     const option = createElement("option");
     option.value = category;
     option.textContent = category;
@@ -426,6 +462,7 @@ function renderVault(): void {
   const notesField = createField("Note", notesInput);
 
   notesField.classList.add("full");
+
   grid.append(
     titleField,
     categoryField,
@@ -455,7 +492,13 @@ function renderVault(): void {
   importInput.hidden = true;
 
   importLabel.appendChild(importInput);
-  actions.append(saveButton, generateButton, exportButton, importLabel);
+
+  actions.append(
+    saveButton,
+    generateButton,
+    exportButton,
+    importLabel
+  );
 
   card.append(grid, actions);
 
@@ -493,10 +536,11 @@ function renderVault(): void {
 }
 
 function renderEntries(): void {
-  const container = document.querySelector<HTMLElement>("#entries");
-  const searchInput = document.querySelector<HTMLInputElement>("#search");
+  const app = getApp();
+  const container = app.querySelector<HTMLElement>("#entries");
+  const searchInput = app.querySelector<HTMLInputElement>("#search");
 
-  if (!container) {
+  if (container === null) {
     return;
   }
 
@@ -557,13 +601,21 @@ function renderEntries(): void {
       void deleteEntry(entry.id, entry.title);
     });
 
-    actions.append(copyUserButton, copyPasswordButton, deleteButton);
+    actions.append(
+      copyUserButton,
+      copyPasswordButton,
+      deleteButton
+    );
+
     article.append(information, actions);
     container.appendChild(article);
   }
 }
 
-async function deleteEntry(id: string, title: string): Promise<void> {
+async function deleteEntry(
+  id: string,
+  title: string
+): Promise<void> {
   if (!confirm(`Eliminare ${title}?`)) {
     return;
   }
@@ -584,11 +636,11 @@ async function saveEntry(): Promise<void> {
   const notesInput = document.querySelector<HTMLInputElement>("#notes");
 
   if (
-    !titleInput ||
-    !usernameInput ||
-    !passwordInput ||
-    !categoryInput ||
-    !notesInput
+    titleInput === null ||
+    usernameInput === null ||
+    passwordInput === null ||
+    categoryInput === null ||
+    notesInput === null
   ) {
     return;
   }
@@ -621,7 +673,7 @@ async function saveEntry(): Promise<void> {
 function exportBackup(): void {
   const file = getStoredFile();
 
-  if (!file) {
+  if (file === null) {
     alert("Nessun vault disponibile.");
     return;
   }
@@ -646,21 +698,16 @@ async function importBackup(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
 
-  if (!file) {
+  if (file === undefined) {
     return;
   }
 
   try {
     const text = await file.text();
-    const imported = JSON.parse(text) as Partial<VaultFile>;
+    const imported: unknown = JSON.parse(text);
 
-    if (
-      imported.version !== 1 ||
-      typeof imported.salt !== "string" ||
-      typeof imported.iv !== "string" ||
-      typeof imported.data !== "string"
-    ) {
-      throw new Error("Formato non valido");
+    if (!isVaultFile(imported)) {
+      throw new Error("Backup non valido");
     }
 
     localStorage.setItem(storageKey, JSON.stringify(imported));
@@ -678,8 +725,11 @@ async function importBackup(event: Event): Promise<void> {
 }
 
 function lock(): void {
+  const app = getApp();
+
   masterPassword = "";
   entries = [];
+  app.replaceChildren();
   renderLogin();
 }
 
